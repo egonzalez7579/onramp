@@ -12,8 +12,8 @@ networks:
 services:
   loki:
     image: grafana/loki:${LOKI_DOCKER_TAG:-latest}
-    container_name: loki
-    restart: unless-stopped
+    container_name: ${LOKI_CONTAINER_NAME:-loki}
+    restart: ${LOKI_RESTART:-unless-stopped}
     volumes:
       - ./etc/loki:/etc/loki
       - /etc/timezone:/etc/timezone:ro
@@ -28,10 +28,10 @@ services:
       - traefik.enable=false
 
   logspout:
-    image: gliderlabs/logspout:${LOGSPOUT_DOCKER_TAG:-latest}
-    container_name: logspout
-    restart: unless-stopped
-    command: syslog+tcp://promtail:1514
+    image: gliderlabs/logspout:${LOKI_LOGSPOUT_DOCKER_TAG:-latest}
+    container_name: ${LOKI_LOGSPOUT_CONTAINER_NAME:-loki-logspout}
+    restart: ${LOKI_LOGSPOUT_RESTART:-unless-stopped}
+    command: syslog+tcp://${LOKI_PROMTAIL_CONTAINER_NAME:-loki-promtail}:1514
     networks:
       - loki
     depends_on:
@@ -47,21 +47,21 @@ services:
       - traefik.enable=false
 
   promtail:
-    image: grafana/promtail:${PROMTAIL_DOCKER_TAG:-latest}
-    container_name: promtail
-    restart: unless-stopped
+    image: grafana/promtail:${LOKI_PROMTAIL_DOCKER_TAG:-latest}
+    container_name: ${LOKI_PROMTAIL_CONTAINER_NAME:-loki-promtail}
+    restart: ${LOKI_PROMTAIL_RESTART:-unless-stopped}
     volumes:
       - /var/log:/var/log
       - ./etc/promtail:/etc/promtail
     # this is only needed if you are going to send syslogs
     # from an external source
-    # ports:
-    #   - 1514:1514 
+    ports:
+      - 1514:1514/udp
+      - 1514:1514 
+      - 9080:9080
     command: -config.file=/etc/promtail/promtail-config.yml
     networks:
       - loki
     labels:
       - com.centurylinklabs.watchtower.enable=true
       - traefik.enable=false
-
-  

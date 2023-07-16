@@ -1,6 +1,7 @@
 # include .env variable in the current environment
-ifneq (,$(wildcard ./.env))
-    include .env
+ENVIRONMENT_FILES := $(wildcard ./environments-enabled/*.env)
+ifneq (,$(wildcard ./environments-enabled/*.env))
+    include ${ENVIRONMENT_FILES}
     export
 endif
 
@@ -131,7 +132,7 @@ else
 endif
 	
 .PHONY: enable-service build 
-enable-service: etc/$(SERVICE_PASSED_DNCASED) services-enabled/$(SERVICE_PASSED_DNCASED).yml
+enable-service: etc/$(SERVICE_PASSED_DNCASED) services-enabled/$(SERVICE_PASSED_DNCASED).yml environments-enabled/$(SERVICE_PASSED_DNCASED).env
 
 etc/$(SERVICE_PASSED_DNCASED):
 	@mkdir -p ./etc/$(SERVICE_PASSED_DNCASED)
@@ -144,20 +145,31 @@ else
 	@echo "No such service file ./services-available/$(SERVICE_PASSED_DNCASED).yml!"
 endif
 
+environments-enabled/$(SERVICE_PASSED_DNCASED).env:
+ifeq (,$(wildcard ./environments-available/$(SERVICE_PASSED_DNCASED).template))
+	@envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/environment.template > environments-available/$(SERVICE_PASSED_DNCASED).template
+endif
+	@python3 scripts/env-subst.py environments-available/$(SERVICE_PASSED_DNCASED).template $(SERVICE_PASSED_UPCASED)
+
 remove-game: disable-service
 disable-game: disable-service
 remove-service: disable-service
 disable-service: stop-service
+	rm ./environments-enabled/$(SERVICE_PASSED_DNCASED).env
 	rm ./services-enabled/$(SERVICE_PASSED_DNCASED).yml
 	rm ./overrides-enabled/$(SERVICE_PASSED_DNCASED)-*.yml 2> /dev/null || true
 
 create-service:
 	envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/service.template > ./services-available/$(SERVICE_PASSED_DNCASED).yml
+	envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/environment.template > environments-available/$(SERVICE_PASSED_DNCASED).template
 	$(EDITOR) ./services-available/$(SERVICE_PASSED_DNCASED).yml
+	$(EDITOR) environments-available/$(SERVICE_PASSED_DNCASED).template
 
 create-game:
 	envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/service.template > ./services-available/games/$(SERVICE_PASSED_DNCASED).yml
+	envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/environment.template > environments-available/$(SERVICE_PASSED_DNCASED).template
 	$(EDITOR) ./services-available/games/$(SERVICE_PASSED_DNCASED).yml
+	$(EDITOR) environments-available/$(SERVICE_PASSED_DNCASED).template
 
 start-dev: COMPOSE_IGNORE_ORPHANS = true 
 start-dev: build services-dev
@@ -249,11 +261,38 @@ list-count: print-enabled count-enabled
 #
 #########################################################
 
-build: .env etc/authelia/configuration.yml etc/dashy/dashy-config.yml etc/prometheus/conf etc/adguard/conf/AdGuardHome.yaml
+build: environments-enabled/onramp.env environments-enabled/onramp-external.env environments-enabled/onramp-nfs.env etc/authelia/configuration.yml etc/dashy/dashy-config.yml etc/prometheus/conf etc/adguard/conf/AdGuardHome.yaml
 
-.env:
-	cp .templates/env.template .env
-	$(EDITOR) .env
+environments-enabled/onramp.env:
+	@clear
+	@echo "***********************************************"
+	@echo "Traefik Turkey OnRamp Setup"
+	@echo "***********************************************"
+	@echo ""
+	@echo "Welcome to OnRamp - Traefik with all the stuffing."
+	@echo ""
+	@echo ""
+	@echo "To proceed with the initial setup you will need to "
+	@echo "provide some information that is required for"
+	@echo "OnRamp to function properly."
+	@echo ""
+	@echo "Required information:"
+	@echo ""
+	@echo "--> Cloudflare Email Address"
+	@echo "--> Cloudflare Access Token"
+	@echo "--> Hostname of system OnRamp is running on."
+	@echo "--> Domain for which traefik will be handling requests"
+	@echo "--> Timezone"
+	@echo ""
+	@echo ""
+	@echo ""
+	@python3 scripts/env-subst.py environments-available/onramp.template "ONRAMP"
+
+environments-enabled/onramp-external.env:
+	cp environments-available/onramp-external.template environments-enabled/onramp-external.env
+
+environments-enabled/onramp-nfs.env:
+	cp environments-available/onramp-nfs.template environments-enabled/onramp-nfs.env
 
 etc/authelia/configuration.yml:
 	envsubst '$${HOST_DOMAIN}' < ./etc/authelia/configuration.template > ./etc/authelia/configuration.yml
@@ -308,51 +347,39 @@ create-external:
 #
 #########################################################
 
-edit-env:
-	$(EDITOR) .env
-
 generate-matrix-config:
-	docker run -it --rm  -v ./etc/synapse:/data  -e SYNAPSE_SERVER_NAME=synapse.traefikturkey.icu -e SYNAPSE_REPORT_STATS=yes matrixdotorg/synapse:latest generate	
+	docker run -it --rm  -v ./etc/synapse:/data  -e SYNAPSE_SERVER_NAME=${SYNAPSE_SERVER_NAME} -e SYNAPSE_REPORT_STATS=${SYNAPSE_REPORT_STATS} matrixdotorg/synapse:latest generate	
 
 #########################################################
 #
-# backup and restore up commands
+# environment helper commands
 #
 #########################################################
 
-export-backup: create-backup
-	@echo "export-backup is depercated and will be removed in the future, please use make create-backup"
+create-environment-template:
+	envsubst '$${SERVICE_PASSED_DNCASED},$${SERVICE_PASSED_UPCASED}' < ./.templates/environment.template > environments-available/$(SERVICE_PASSED_DNCASED).template
+	$(EDITOR) environments-available/$(SERVICE_PASSED_DNCASED).template
 
-import-backup: restore-backup
-	@echo "import-backup is depercated and will be removed in the future, please use make restore-backup"
+edit-env-template:
+	$(EDITOR) environments-available/$(SERVICE_PASSED_DNCASED).template
 
-create-backup: backups
-	sudo tar --exclude=.keep -czf ./backups/onramp-config-backup-$(HOST_NAME)-$(shell date +'%y-%m-%d-%H%M').tar.gz ./etc ./services-enabled ./overrides-enabled .env || true
+edit-env:
+	$(EDITOR) environments-enabled/$(SERVICE_PASSED_DNCASED).env
 
-create-nfs-backup: create-backup
-	sudo mount -t nfs $(NFS_SERVER):$(NFS_BACKUP_PATH) $(NFS_BACKUP_TMP_DIR)
-	sudo mv ./backups/onramp-config-backup* $(NFS_BACKUP_TMP_DIR)
-	sudo umount $(NFS_BACKUP_TMP_DIR)
+edit-env-onramp:
+	$(EDITOR) environments-enabled/onramp.env
 
-backups:
-	mkdir -p ./backups/
+edit-env-nfs:
+	$(EDITOR) environments-enabled/onramp-nfs.env
 
-restore-backup:
-	sudo tar -xvf ./backups/onramp-config-backup-$(HOST_NAME)-*.tar.gz
+edit-env-external:
+	$(EDITOR) environments-enabled/onramp-external.env
 
-$(NFS_BACKUP_TMP_DIR):
-	sudo mkdir -p $(NFS_BACKUP_TMP_DIR)
-	sudo mount -t nfs $(NFS_SERVER):$(NFS_BACKUP_PATH) $(NFS_BACKUP_TMP_DIR)
-	
-restore-nfs-backup: $(NFS_BACKUP_TMP_DIR) backups
-	$(eval BACKUP_FILE := $(shell find $(NFS_BACKUP_TMP_DIR)/*$(HOST_NAME)* -type f -printf "%T@ %p\n" | sort -n | cut -d' ' -f 2- | tail -n 1))
-	sudo rm -rf ./backups/*
-	cp -p  $(BACKUP_FILE) ./backups/
-	sudo tar -xvf ./backups/*
-	echo $(shell basename $(BACKUP_FILE)) > .restore_latest
-	sudo umount $(NFS_BACKUP_TMP_DIR)
-	sudo rm -r $(NFS_BACKUP_TMP_DIR)
-	echo -n "Please run 'make restart' to apply restored backup"	
+regenerate-env:
+	@python3 scripts/env-subst.py environments-available/$(SERVICE_PASSED_DNCASED).template $(SERVICE_PASSED_UPCASED)
+
+show-env:
+	@env | sort
 
 #########################################################
 #
@@ -408,66 +435,6 @@ delete-tunnel:
 show-tunnel:
 	$(CLOUDFLARE_CMD) tunnel info $(CLOUDFLARE_TUNNEL_NAME)
 
-#########################################################
-#
-# mariadb commands
-#
-#########################################################
-
-ifndef MARIADB_CONTAINER_NAME
-MARIADB_CONTAINER_NAME=mariadb
-endif
-
-# enable this to be asked for password to when you connect to the database
-#mysql-connect = @docker exec -it $(MARIADB_CONTAINER_NAME) mysql -p
-
-# enable this to not be asked for password to when you connect to the database
-mysql-connect = @docker exec -it $(MARIADB_CONTAINER_NAME) mysql -p$(MARIADB_ROOT_PASSWORD)
-
-first_arg = $(shell echo $(EMPTY_TARGETS)| cut -d ' ' -f 1)
-second_arg = $(shell echo $(EMPTY_TARGETS)| cut -d ' ' -f 2)
-
-password := $(shell openssl rand -hex 16)
-
-
-mariadb-console:
-	$(mysql-connect)
-
-create-database:
-	$(mysql-connect) -e 'CREATE DATABASE IF NOT EXISTS $(first_arg);'
-
-show-databases: 
-	$(mysql-connect) -e 'show databases;'
-
-create-db-user:
-	$(mysql-connect) -e 'CREATE USER $(first_arg) IDENTIFIED BY "'$(second_arg)'";'
-
-create-db-user-pw: 
-	@echo Here is your password : $(password) : Please put it in the .env file under the service name
-	$(mysql-connect) -e 'CREATE USER IF NOT EXISTS $(first_arg) IDENTIFIED BY "'$(password)'";'
-
-grant-db-perms:
-	$(mysql-connect) -e 'GRANT ALL PRIVILEGES ON '$(first_arg)'.* TO $(first_arg);'
-
-remove-db-user: 
-	$(mysql-connect) -e 'DROP USER $(first_arg);'
-
-drop-database:
-	$(mysql-connect) -e 'DROP DATABASE $(first_arg);'
-
-create-user-with-db: create-db-user-pw create-database grant-db-perms
-
-#########################################################
-#
-# prestashop commands
-#
-#########################################################
-
-remove-presta-install-folder:
-	@sudo rm -rf etc/prestashop/install/
-
-rename-presta-admin:
-	@sudo mv etc/prestashop/admin/ etc/prestashop/$(first_arg)
 
 #########################################################
 #
@@ -485,7 +452,5 @@ test-smtp:
 echo:
 	@$(MAKE) -pn | grep -A1 "^# makefile"| grep -v "^#\|^--" | grep -e "^[A-Z]+*" | sort
 
-env:
-	@env | sort
 
-include env_ifs.mk
+include .makes/*.mk
